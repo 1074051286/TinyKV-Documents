@@ -42,6 +42,37 @@
 - 返回成功响应；
 
 ### region split
+## woker线程的分类
+
+- woker线程全部都由raftstore的startWorkers开启
+
+  ```go
+  func (bs *Raftstore) startWorkers(peers []*peer) {
+  	ctx := bs.ctx
+  	workers := bs.workers
+  	router := bs.router
+  	bs.wg.Add(2) // raftWorker, storeWorker
+  	rw := newRaftWorker(ctx, router)//start raftWorker
+  	go rw.run(bs.closeCh, bs.wg)
+  	sw := newStoreWorker(ctx, bs.storeState)//start storeWorker
+  	go sw.run(bs.closeCh, bs.wg)
+  	router.sendStore(message.Msg{Type: message.MsgTypeStoreStart, Data: ctx.store})
+  	for i := 0; i < len(peers); i++ {
+  		regionID := peers[i].regionId
+  		_ = router.send(regionID, message.Msg{RegionID: regionID, Type: message.MsgTypeStart})
+  	}
+  	engines := ctx.engine
+  	cfg := ctx.cfg
+      //四种杂项woker的开启
+      //splitCheckWorker/schedulerWorker/raftLogGCWorker/regionWorker
+  	workers.splitCheckWorker.Start(runner.NewSplitCheckHandler(engines.Kv, NewRaftstoreRouter(router), cfg))
+  	workers.regionWorker.Start(runner.NewRegionTaskHandler(engines, ctx.snapMgr))
+  	workers.raftLogGCWorker.Start(runner.NewRaftLogGCTaskHandler())
+  	workers.schedulerWorker.Start(runner.NewSchedulerTaskHandler(ctx.store.Id, ctx.schedulerClient, NewRaftstoreRouter(router)))
+  	go bs.tickDriver.run()
+  }
+  ```
+### 
 
 split_check的woker线程会定期检查某个region是否满足spilt的条件(设置的固定大小)，如果满足就去找出split的key并发送出去：
 
